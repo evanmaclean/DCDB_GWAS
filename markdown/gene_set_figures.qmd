@@ -1,0 +1,250 @@
+---
+title: "gene set results"
+format: html
+execute: 
+  echo: false
+  warning: false
+  message: false
+editor: visual
+embed-resources: true
+---
+
+## EPIC - dog tissue expression
+
+```{r, fig.width = 11, fig.height = 11}
+library(tidyverse)
+library(fs)
+library(janitor)
+library(readxl)
+library(forcats)
+library(rprojroot)
+library(patchwork)
+root <- find_root(is_rstudio_project)
+setwd(root)
+knitr::opts_knit$set(root.dir = getwd())
+thr <- -log10(0.10)
+
+
+dict <- read_excel('gwas_dictionary.xlsx')
+
+my_files <- dir_ls('magma_files/magma_gene_set_analysis/epic_tissue_gene_sets/')
+my_files <- my_files[str_detect(my_files, pattern = "gsa.out")]
+
+dat <- map_dfr(my_files, read_table, .id = 'trait', skip = 4)
+dat <- mutate(dat, trait = str_remove(trait, pattern =  "magma_files/magma_gene_set_analysis/epic_tissue_gene_sets/"))
+dat <- mutate(dat, trait = str_remove(trait, pattern = ".gsa.out"))
+dat <- clean_names(dat)
+
+dat <- filter(dat, str_detect(variable, "Group-Enriched", negate = T)) |> filter(str_detect(variable, 'overall', negate = T))
+
+dat$trait <- dict$new[match(dat$trait, dict$old)]
+dat <- dat |> group_by(trait) |> mutate(p = p.adjust(p, method = "fdr")) |> ungroup()
+dat <- mutate(dat, logp = -log10(p))
+dat <- separate(dat, col = variable, into = c('tissue', 'category'), sep = "_")
+dat <- filter(dat, category != "overall")
+dat <- mutate(dat, tissue = case_when(
+  tissue == "CL" ~ "cerebellum",
+  tissue == "CR" ~ "cerebral cortex",
+  tissue == "CO" ~ "colon",
+  tissue == "KI" ~ "kidney",
+  tissue == "LI" ~ "liver",
+  tissue == "LU" ~ "lung",
+  tissue == "PA" ~ "pancreas",
+  tissue == "SP" ~ "spleen",
+  tissue == "ST" ~ "stomach",
+  tissue == "MG" ~ "mammary gland",
+  tissue == "OV" ~ "ovary"
+  ))
+
+dat2 <- dat %>%
+  mutate(sig = logp >= thr)
+
+dat2 <- mutate(dat2, trait = fct(trait, levels = c("inhibitory control (cyl)",
+                                      "reversal learning (cyl)",
+                                      "gaze (unsolvable task)",
+                                      "manipulation time (unsolvable task)",
+                                      "gaze (human interest)",
+                                      "proximity (human interest)",
+                                      "boldness (novel object)",
+                                      "boldness (surprising events)"
+                                       )), )
+               
+              
+(epic_plot <- ggplot(dat2, aes(x = tissue, y = trait, fill = logp)) +
+  geom_tile(color = "white", linewidth = 0.2) +
+  geom_point(
+    data = subset(dat2, sig),
+    shape = 21, fill = "white", color = "black", size = 2
+  ) +
+  facet_grid(cols = vars(category)) +
+  scale_fill_viridis_c(option = "inferno", limits = c(0,2.5)) +
+  theme_minimal(18) +
+  labs(x = "", y = "", fill = expression(-log[10](p))) + 
+  theme(panel.grid  = element_blank(),
+        text = element_text(family = "Arial"),
+        axis.text = element_text(size = 16),
+        axis.text.x = element_text(angle = -45, hjust = 0)))
+
+#ggsave(filename = "figures/EPIC_tissue_enrichment.tiff", width = 8, height = 3)
+
+```
+
+## DoGA CNS genes
+
+```{r, fig.width = 8, fig.height = 48}
+
+###
+# DoGA tissue genes ----
+###
+
+my_files <- dir_ls('magma_files/magma_gene_set_analysis/DoGA_CNS_gene_sets/')
+my_files <- my_files[str_detect(my_files, pattern = "gsa.out")]
+
+
+dat <- map_dfr(my_files, read_table, .id = 'trait', skip = 4)
+dat <- mutate(dat, trait = str_remove(trait, pattern =  "magma_files/magma_gene_set_analysis/DoGA_CNS_gene_sets/"))
+dat <- mutate(dat, trait = str_remove(trait, pattern = ".gsa.out"))
+dat <- clean_names(dat)
+dat$trait <- dict$new[match(dat$trait, dict$old)]
+dat <- dat |> group_by(trait) |> mutate(p = p.adjust(p, method = "fdr")) |> ungroup()
+dat <- mutate(dat, logp = -log10(p))
+dat <- separate(dat, col = full_name, into = c('tissue', 'category'), sep = "_")
+
+dat2 <- dat %>%
+  mutate(sig = logp >= thr)
+
+dat2 <- mutate(dat2, trait = fct(trait, levels = c("inhibitory control (cyl)",
+                                      "reversal learning (cyl)",
+                                      "gaze (unsolvable task)",
+                                      "manipulation time (unsolvable task)",
+                                      "gaze (human interest)",
+                                      "proximity (human interest)",
+                                      "boldness (novel object)",
+                                      "boldness (surprising events)"
+                                       )))
+
+(doga_plot <- ggplot(dat2, aes(x = tissue, y = trait, fill = logp)) +
+  geom_tile(color = "white", linewidth = 0.2) +
+  geom_point(
+    data = subset(dat2, sig),
+    shape = 21, fill = "white", color = "black", size = 2
+  ) +
+  scale_fill_viridis_c(option = "inferno", limits = c(0,2.5)) +
+  theme_minimal(18) +
+  labs(x = "", y = "", fill = expression(-log[10](p))) + 
+  theme(text = element_text(family = "Arial"),
+        panel.grid  = element_blank(),
+        axis.text = element_text(size = 16),
+        axis.text.x = element_text(angle = -45, hjust = 0)))
+
+epic_plot + doga_plot + plot_layout(widths = c(3,1), guides = "collect") + plot_annotation(tag_levels = "A")
+ggsave(filename = "figures/tissue_enrichment.tiff", width = 20, height = 6)
+```
+
+## temperament zwir
+
+```{r}
+my_files <- dir_ls('magma_files/magma_gene_set_analysis/zwir_temperament_2018/')
+my_files <- my_files[str_detect(my_files, pattern = "gsa.out")]
+
+dat <- map_dfr(my_files, read_table, .id = 'trait', skip = 4)
+dat <- mutate(dat, trait = str_remove(trait, pattern =  "magma_files/magma_gene_set_analysis/zwir_temperament_2018/"))
+dat <- mutate(dat, trait = str_remove(trait, pattern = ".gsa.out"))
+dat <- clean_names(dat)
+dat$trait <- dict$new[match(dat$trait, dict$old)]
+dat <- dat |> group_by(trait) |> mutate(p = p.adjust(p, method = "fdr")) |> ungroup()
+dat <- mutate(dat, logp = -log10(p))
+
+theme_set(theme_bw())
+dat2 <- dat %>%
+  mutate(sig = logp >= thr)
+
+dat2 <- mutate(dat2, trait = fct(trait, levels = c("inhibitory control (cyl)",
+                                      "reversal learning (cyl)",
+                                      "gaze (unsolvable task)",
+                                      "manipulation time (unsolvable task)",
+                                      "gaze (human interest)",
+                                      "proximity (human interest)",
+                                      "boldness (novel object)",
+                                      "boldness (surprising events)"
+                                       )))
+
+ggplot(dat2, aes(x = variable, y = trait, fill = logp)) +
+  geom_tile(color = "white", linewidth = 0.2) +
+  geom_point(
+    data = subset(dat2, sig),
+    shape = 21, fill = "white", color = "black", size = 2
+  ) +
+  scale_fill_viridis_c(option = "inferno") +
+  theme_minimal(16) +
+  theme(
+    panel.grid  = element_blank(),
+    axis.text.x = element_text(angle = -45, hjust = 0)
+  ) +
+  labs(x = "", y = "", fill = expression(-log[10](p))) + 
+  theme(text = element_text(family = "Arial"))
+
+# saving this to plot below together with big 5
+temperament <- dat2
+temperament <- mutate(temperament, category = "temperament")
+
+```
+
+## big 5, Schwaba et al.
+
+```{r}
+my_files <- dir_ls('magma_files/magma_gene_set_analysis/big5_schwaba/')
+my_files <- my_files[str_detect(my_files, pattern = "gsa.out")]
+
+dat <- map_dfr(my_files, read_table, .id = 'trait', skip = 4)
+dat <- mutate(dat, trait = str_remove(trait, pattern =  "magma_files/magma_gene_set_analysis/big5_schwaba/"))
+dat <- mutate(dat, trait = str_remove(trait, pattern = ".gsa.out"))
+dat <- clean_names(dat)
+dat$trait <- dict$new[match(dat$trait, dict$old)]
+dat <- dat |> group_by(trait) |> mutate(p = p.adjust(p, method = "fdr")) |> ungroup()
+dat <- mutate(dat, logp = -log10(p))
+
+# fix typo with extraversion
+dat <- mutate(dat, variable = if_else(variable == 'extroversion', 'extraversion', variable))
+
+theme_set(theme_bw())
+
+thr <- -log10(0.05)
+dat2 <- dat %>%
+  mutate(sig = logp >= thr)
+
+dat2 <- mutate(dat2, trait = fct(trait, levels = c("inhibitory control (cyl)",
+                                      "reversal learning (cyl)",
+                                      "gaze (unsolvable task)",
+                                      "manipulation time (unsolvable task)",
+                                      "gaze (human interest)",
+                                      "proximity (human interest)",
+                                      "boldness (novel object)",
+                                      "boldness (surprising events)"
+                                       )))
+               
+
+big5 <- dat2
+big5 <- mutate(big5, category = "personality")
+
+plot_dat <- reduce(list(temperament, big5), bind_rows)
+              
+ggplot(plot_dat, aes(x = variable, y = trait, fill = logp)) +
+  geom_tile(color = "white", linewidth = 0.2) +
+  geom_point(
+    data = subset(plot_dat, sig),
+    shape = 21, fill = "white", color = "black", size = 2
+  ) +
+  facet_grid(cols = vars(category), scales = "free_x", space = "free_x") +
+  scale_fill_viridis_c(option = "inferno") +
+  theme_minimal(16) +
+  theme(
+    panel.grid  = element_blank(),
+    axis.text.x = element_text(angle = -45, hjust = 0)
+  ) +
+  labs(x = "", y = "", fill = expression(-log[10](p))) + 
+  theme(text = element_text(family = "Arial")) 
+
+ggsave(filename = "figures/personality_temperament_enrichment.tiff", width = 8, height = 5)
+
+```

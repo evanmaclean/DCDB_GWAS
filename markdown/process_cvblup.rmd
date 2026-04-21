@@ -1,0 +1,138 @@
+---
+title: "cv_blup with breed covariate"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo = F, message = F, warning=FALSE, fig.width=8, fig.height=8}
+library(tidyverse)
+library(GGally)
+library(fs)
+library(glue)
+library(readxl)
+library(broom)
+theme_set(theme_bw(14))
+
+phens <- read_csv(file = 'pheno_list', col_names = "pheno") |> pull(pheno)
+dict <- read_excel('gwas_dictionary.xlsx')
+
+my_results <- map_dfr(phens, function(pheno) {
+
+my_lab <- dict$new[match(pheno, dict$old)]
+
+# the CVblups are the genetic component after the covariates are adjusted for.  So, the best way to look at their relationship with the phenotype is by first adjusting the phenotype for those covariates. 
+
+covar <- read_delim('gcta_files/covar.covar', col_names = c('iid','fid','sex','experimenter','region','battery_type', 'batch'))
+qcovar <- read_delim('gcta_files/qcovar.qcovar', col_names = c('iid','fid','test_age_years'))
+phenos <- read_delim(glue('gcta_files/phenos/{pheno}.phen'), col_names = c("iid","fid","pheno"))
+blups <- read_delim(glue('gcta_files/cv_blup/{pheno}.indi.cvblp'), col_names = c("iid","fid","i1","cv_blup","i2","res"))
+#pgs <- read_table(glue('cv_blup/{pheno}.profile')) |> select(-PHENO)
+#pgs <- rename(pgs, name = FID, id = IID, polygenic_score = SCORE)
+
+mod_dat <- purrr::reduce(list(covar, qcovar, phenos, select(blups, iid, fid, cv_blup)), full_join)
+
+base_mod <- lm(pheno~test_age_years + region + experimenter + battery_type + batch + test_age_years, data = mod_dat)
+checks <- augment(base_mod, newdata = mod_dat) |> select(pheno, base_fit = .fitted, resid = .resid)
+base_mod_rsq <- glance(base_mod) |> pull(r.squared)
+  
+add_blup <- lm(pheno~test_age_years + region + experimenter + battery_type + batch + test_age_years + cv_blup, data = mod_dat)
+add_blup_rsq <- glance(add_blup) |> pull(r.squared)
+checks2 <- augment(add_blup) |> select(pheno, add_blup = .fitted)
+checks$cv_blup <- mod_dat$cv_blup
+
+blup_resid <- lm(resid~cv_blup, data = checks)
+glance(blup_resid)
+
+p <- checks |> select(pheno, cv_blup, resid) |> ggpairs(title = paste(my_lab)) 
+print(p)
+
+plot_dat <- select(checks, resid, cv_blup) |> mutate(quartile = ntile(cv_blup, 4), std_resid = as.vector(scale(resid)))  |> mutate(quartile = factor(quartile)) |> filter(!is.na(quartile))
+
+# get summary difference
+my_diff <- filter(plot_dat, quartile %in% c(1,4)) |>  mutate(std_resid = as.vector(scale(resid))) |> group_by(quartile) |> summarise(mean = mean(std_resid, na.rm = T))
+
+realized_diff <- my_diff$mean[my_diff$quartile == 4] - my_diff$mean[my_diff$quartile == 1]
+
+print(glue("difference between top and bottom quartiles on {my_lab} = {round(realized_diff, 2)}"))
+
+p2 <- ggplot(filter(plot_dat, quartile %in% c(1,4)), aes(x = quartile, y = std_resid)) + stat_summary() + labs(y = glue("{my_lab}"), x = "Predicted genetic value (quartile)")
+print(p2)
+
+directory_path <- "figures/cvBlup_quartiles" # Specify the path of the directory you want to create
+
+if (!dir.exists(directory_path)) {
+  dir.create(directory_path)
+  cat(sprintf("Directory '%s' created.\n", directory_path))
+} else {
+  cat(sprintf("Directory '%s' already exists.\n", directory_path))
+}
+
+ggsave(filename = glue("{directory_path}/{my_lab}.tiff"), width = 4, height = 4)
+
+out <- select(plot_dat, cv_blup, resid) |> mutate(task = my_lab)
+})
+
+```
+
+# summary figure
+```{r}
+
+cors <- my_results %>%
+  group_by(task) %>%
+  summarise(
+    r = cor(cv_blup, resid, use = "complete.obs"),
+    p = cor.test(cv_blup, resid)$p.value,
+    .groups = "drop"
+  ) %>%
+  mutate(
+    p_label = if_else(
+      p < 0.01,
+      "p < 0.01",
+      sprintf("p = %.2g", p)
+    ),
+    label = sprintf("r = %.2f\n%s", r, p_label)
+  )
+
+cors_pos <- my_results %>%
+  group_by(task) %>%
+  summarise(
+    x = max(cv_blup, na.rm = TRUE),
+    y = min(resid,   na.rm = TRUE),
+    xr = diff(range(cv_blup, na.rm = TRUE)),
+    yr = diff(range(resid,   na.rm = TRUE)),
+    .groups = "drop"
+  ) %>%
+  left_join(cors, by = "task") %>%
+  mutate(
+    x = x - 0.02 * xr,   # move left from right edge
+    y = y + 0.02 * yr   # move up from bottom edge
+  )
+
+ggplot(my_results, aes(x = cv_blup, y = resid)) + 
+  geom_point(alpha = 1/8) + 
+  geom_smooth(method = "lm", se = FALSE) +
+  facet_wrap(~ task, scales = "free", nrow = 2) +
+  geom_text(
+    data = cors_pos,
+    aes(x = x, y = y, label = label),
+    hjust = 1, vjust = 0,
+    inherit.aes = FALSE,
+    size = 2
+  ) +
+  theme_classic(9) +
+  theme(
+    text = element_text(family = "Arial")
+  ) +
+  labs(y = "covariate-adjusted phenotype",
+       x = "cross-validated BLUP")
+  
+
+ggsave(filename = "figures/cv_blup_pheno_correlations.tiff", width = 8, height = 4)
+
+```
+
+

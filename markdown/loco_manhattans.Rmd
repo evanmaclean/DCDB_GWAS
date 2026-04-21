@@ -1,0 +1,79 @@
+---
+title: 'SNP manhattans no breed covariate'
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(qqman)
+library(fs)
+library(fastman)
+library(ggmanh) # using this one currently
+library(readxl)
+library(glue)
+```
+
+```{r manhattans, echo=FALSE, warning = F, fig.height=8, fig.width = 8, message=FALSE}
+dict <- read_excel('gwas_dictionary.xlsx')
+
+res <- dir_ls('gcta_files/mlma_loco_results')
+res <- res[str_ends(string = res, pattern = ".mlma")]
+
+load('gene_info/nearest_gene.RData')
+nearest.gene <- select(nearest.gene, SNP, distance, gene)
+
+#i <- res[1]
+
+for (i in res) {
+
+dat <- read_delim(i, col_types = cols(
+    Chr = col_double(),
+    SNP = col_character(),
+    bp = col_double(),
+    A1 = col_character(),
+    A2 = col_character(),
+    Freq = col_double(),
+    b = col_double(),
+    se = col_double(),
+    p = col_double()
+  )
+)
+
+dat <- filter(dat, !is.na(p)) # for now drop any sites with NA
+my_var <- str_remove(i, "gcta_files/mlma_loco_results/") %>% str_remove(".loco.mlma")
+my_lab <- dict$new[dict$old == my_var]
+
+dat <- left_join(dat, nearest.gene)
+# set aside other values
+other_dat <- dat
+# for now, look at the lowest p value for each gene
+dat <- group_by(dat, gene) %>% slice_min(order_by = p, n = 1, with_ties = F)
+other_dat <- anti_join(other_dat, dat) # other values
+#dat <- rename(dat, snp = SNP, SNP = gene) # moving gene name to SNP for annotation purposes
+# create labels for p values 
+dat <- mutate(dat, label = if_else(-log10(p) > (-log10(1.49e-6)), true = gene, false = NA_character_))
+other_dat$label = NA_character_
+
+# join together top results and others for plot so we can see full peaks
+dat <- bind_rows(dat, other_dat)
+
+dat <- mutate(dat, n_l10_p = -log10(p))
+ymax <- max(dat$n_l10_p)
+
+# I'm suppressing labels for now. 
+my_plot <- manhattan_plot(x = dat, pval.colname = 'p', chr.colname = 'Chr', pos.colname = "bp", max.overlaps = 20, signif = c(1.49e-6, 2.97e-5)) + labs(title = my_lab) + coord_cartesian(ylim = c(0, ymax + 0.5))
+print(my_plot)
+
+new_dir_path <- "figures/snp_manhattans/"
+
+if (!dir.exists(new_dir_path)) {
+  dir.create(new_dir_path)
+}
+
+ggsave(glue("{new_dir_path}/{my_lab}.png"), width = 8, height = 3)
+
+}
+
+```

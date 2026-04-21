@@ -1,0 +1,24 @@
+# Ignore everything
+/*
+/.*
+
+# Allow only code folders
+!Rscripts/
+!scripts/
+!markdown/
+
+# Allow contents within those folders
+!Rscripts/**
+!scripts/**
+!markdown/**
+
+# R clutter
+*.Rhistory
+*.RData
+.Rproj.user/
+
+# HPC job artifacts
+*.o
+*.e
+slurm-*.out
+*.tmp
