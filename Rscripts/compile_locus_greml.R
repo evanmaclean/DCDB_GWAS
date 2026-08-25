@@ -245,5 +245,5 @@ gt_tbl <- table_dat |>
 
 gt_tbl
 
-gtsave(gt_tbl, "figures/locus_variance_explained_table.html")
+gtsave(gt_tbl, "tables/locus_variance_explained_table.docx")
 

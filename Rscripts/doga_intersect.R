@@ -1,83 +1,12 @@
-#!/usr/bin/env Rscript
-# =============================================================================
-# gwas_doga_intersect.R
-#
-# Intersect GWAS LD-expanded SNP lists with DoGA promoter and enhancer tracks.
-#
-# SLURM USAGE
-# -------------------------------------------------------------------------
-# Create a separate wrapper script (e.g. run_doga_intersect.sbatch):
-#
-#   #!/bin/bash
-#   #SBATCH --job-name=doga_intersect
-#   #SBATCH --output=logs/doga_intersect_%j.out
-#   #SBATCH --error=logs/doga_intersect_%j.err
-#   #SBATCH --ntasks=1
-#   #SBATCH --cpus-per-task=1
-#   #SBATCH --mem=8G
-#   #SBATCH --time=01:00:00
-#   #SBATCH --partition=your_partition
-#
-#   module load R/4.x.x
-#   module load bedtools
-#
-#   Rscript /path/to/gwas_doga_intersect.R \
-#     --project_root /path/to/project
-#
-# INTERACTIVE USAGE (for debugging)
-# -------------------------------------------------------------------------
-# Option 1 — source() from an R session after pre-defining opt:
-#
-#   opt <- list(project_root = ".",
-#               snp_file     = "locus_snps.txt",
-#               window       = 0L,
-#               output_dir   = "doga_intersections")
-#   source("gwas_doga_intersect.R")
-#
-# Option 2 — run Rscript with no arguments; parse_args() uses defaults
-#   and the script runs from the current working directory.
-#
-# Option 3 — source() to load the functions, then call them manually.
-#   This is the most flexible for step-by-step debugging.
-#
-# PROJECT STRUCTURE ASSUMED:
-#   <project_root>/
-#     DoGA_data/
-#       enhancers/
-#         enhancers_with_annotation_column_TE_bed/   <- tissue-specific BEDs
-#         bed/_Enhancer_robust.bed                   <- all-tissue master BEDs
-#         bed/_Enhancer_comp.bed
-#       promoters/
-#         Promoters_TE_bed/bed/                      <- tissue-specific BEDs
-#         Promoters_with_annotation_column_TE_txt/   <- same regions + gene names
-#     gcta_files/greml_estimates/locus_greml/
-#       <trait>/
-#         <locus>/
-#           locus_snps.txt     <- LD-expanded SNPs, one per line as CHR:POS
-#
-# OUTPUT:  <project_root>/doga_intersections/
-#   <trait>__<locus>__snp_hits.tsv         - per SNP x DoGA element hit detail
-#   <trait>__<locus>__summary.tsv          - per track hit counts
-#   all_traits_combined_summary.tsv        - long-format across all traits/loci
-#   brain_endocrine_hits.tsv               - hits in brain/neuroendocrine tissues
-#   brain_endocrine_gene_hits.tsv          - promoter hits collapsed to gene level
-#
-# DEPENDENCIES: bedtools on PATH; R packages: optparse, tidyverse, fs
-# =============================================================================
-
-suppressPackageStartupMessages({
-  library(optparse)
-  library(tidyverse)
-  library(fs)
-})
+library(optparse)
+library(tidyverse)
+library(fs)
 
 # Set path to local bedtools
 Sys.setenv(PATH = paste("/opt/ohpc/pub/apps/bedtools2/2.29.2/bin",
                         Sys.getenv("PATH"), sep = ":"))
 
-# ── Argument parsing ───────────────────────────────────────────────────────────
-# Only runs parse_args() when not interactive OR when `opt` hasn't been
-# pre-defined (so interactive users can set opt manually and source() the file).
+
 if (!interactive() || !exists("opt")) {
   option_list <- list(
     make_option("--project_root", type = "character", default = ".",
